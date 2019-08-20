@@ -21,6 +21,10 @@
 #include <aws/common/thread.h>
 #include <aws/testing/aws_test_harness.h>
 
+#include <aws/common/clock.h>
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 static int s_test_1_to_1_acquire_release_wraps(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct aws_ring_buffer ring_buffer;
@@ -228,6 +232,10 @@ struct mt_test_data {
     int max_count;
     bool consumer_finished;
     bool match_failed;
+    uint64_t ticks_in_release;
+    uint64_t ticks_in_acquire;
+    uint64_t acq_okay_count;
+    uint64_t acq_fail_count;
 };
 
 struct mt_test_buffer_node {
@@ -288,7 +296,12 @@ static void s_consumer_thread(void *args) {
             break;
         }
 
+        uint64_t ticks_before;
+        uint64_t ticks_after;
+        aws_sys_clock_get_ticks(&ticks_before);
         aws_ring_buffer_release(&test_data->ring_buf, &buffer_node->buf);
+        aws_sys_clock_get_ticks(&ticks_after);
+        test_data->ticks_in_release += (ticks_after - ticks_before);
     }
 
     aws_mutex_lock(&test_data->mutex);
@@ -325,6 +338,10 @@ static int s_test_acquire_any_muti_threaded(
         .max_count = 1000000,
         .consumer_finished = false,
         .termination_signal = AWS_CONDITION_VARIABLE_INIT,
+        .ticks_in_release = 0,
+        .ticks_in_acquire = 0,
+        .acq_okay_count = 0,
+        .acq_fail_count = 0,
     };
 
     static struct mt_test_buffer_node s_buffer_nodes[MT_BUFFER_COUNT];
@@ -346,7 +363,15 @@ static int s_test_acquire_any_muti_threaded(
         struct aws_byte_buf dest;
         AWS_ZERO_STRUCT(dest);
 
-        if (!acquire_fn(&test_data.ring_buf, MT_TEST_BUFFER_SIZE, &dest)) {
+        uint64_t ticks_before;
+        uint64_t ticks_after;
+        aws_sys_clock_get_ticks(&ticks_before);
+        int result = acquire_fn(&test_data.ring_buf, MT_TEST_BUFFER_SIZE, &dest);
+        aws_sys_clock_get_ticks(&ticks_after);
+        test_data.ticks_in_acquire += (ticks_after - ticks_before);
+        if (result == AWS_OP_SUCCESS) test_data.acq_okay_count += 1; else test_data.acq_fail_count += 1;
+
+        if (!result) {
             size_t written = 0;
             memset(dest.buffer, 0, dest.capacity);
             /* all this does is print count out as far as it can to fill the buffer. */
@@ -379,6 +404,11 @@ static int s_test_acquire_any_muti_threaded(
     aws_thread_clean_up(&consumer_thread);
 
     ASSERT_FALSE(test_data.match_failed);
+    fprintf(stdout, "ticks_in_release = %"PRIu64"\n", test_data.ticks_in_release);
+    fprintf(stdout, "ticks_in_acquire = %"PRIu64"\n", test_data.ticks_in_acquire);
+    fprintf(stdout, "acq_okay_count = %"PRIu64"\n", test_data.acq_okay_count);
+    fprintf(stdout, "acq_fail_count = %"PRIu64"\n", test_data.acq_fail_count);
+    fprintf(stdout, "Test finished!\n");
 
     return AWS_OP_SUCCESS;
 }
