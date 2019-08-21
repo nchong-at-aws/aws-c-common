@@ -234,6 +234,8 @@ struct mt_test_data {
     bool match_failed;
     uint64_t ticks_in_release;
     uint64_t ticks_in_acquire;
+    uint64_t ticks_in_acquire_okay;
+    uint64_t ticks_in_acquire_fail;
     uint64_t acq_okay_count;
     uint64_t acq_fail_count;
 };
@@ -340,6 +342,8 @@ static int s_test_acquire_any_muti_threaded(
         .termination_signal = AWS_CONDITION_VARIABLE_INIT,
         .ticks_in_release = 0,
         .ticks_in_acquire = 0,
+        .ticks_in_acquire_okay = 0,
+        .ticks_in_acquire_fail = 0,
         .acq_okay_count = 0,
         .acq_fail_count = 0,
     };
@@ -369,7 +373,13 @@ static int s_test_acquire_any_muti_threaded(
         int result = acquire_fn(&test_data.ring_buf, MT_TEST_BUFFER_SIZE, &dest);
         aws_sys_clock_get_ticks(&ticks_after);
         test_data.ticks_in_acquire += (ticks_after - ticks_before);
-        if (result == AWS_OP_SUCCESS) test_data.acq_okay_count += 1; else test_data.acq_fail_count += 1;
+        if (result == AWS_OP_SUCCESS) {
+            test_data.ticks_in_acquire_okay += (ticks_after - ticks_before);
+            test_data.acq_okay_count += 1;
+        } else {
+            test_data.ticks_in_acquire_fail += (ticks_after - ticks_before);
+            test_data.acq_fail_count += 1;
+        }
 
         if (!result) {
             size_t written = 0;
@@ -406,6 +416,8 @@ static int s_test_acquire_any_muti_threaded(
     ASSERT_FALSE(test_data.match_failed);
     fprintf(stdout, "ticks_in_release = %"PRIu64"\n", test_data.ticks_in_release);
     fprintf(stdout, "ticks_in_acquire = %"PRIu64"\n", test_data.ticks_in_acquire);
+    fprintf(stdout, "ticks_in_acquire_okay = %"PRIu64"\n", test_data.ticks_in_acquire_okay);
+    fprintf(stdout, "ticks_in_acquire_fail = %"PRIu64"\n", test_data.ticks_in_acquire_fail);
     fprintf(stdout, "acq_okay_count = %"PRIu64"\n", test_data.acq_okay_count);
     fprintf(stdout, "acq_fail_count = %"PRIu64"\n", test_data.acq_fail_count);
     fprintf(stdout, "Test finished!\n");
