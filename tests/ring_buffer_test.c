@@ -232,12 +232,15 @@ struct mt_test_data {
     int max_count;
     bool consumer_finished;
     bool match_failed;
-    uint64_t ticks_in_release;
-    uint64_t ticks_in_acquire;
-    uint64_t ticks_in_acquire_okay;
-    uint64_t ticks_in_acquire_fail;
+    uint64_t ticks_in_acquire;      //< total number of ticks across all acquire() calls
+    uint64_t ticks_in_acquire_okay; //<                                  *successful* acquire calls()
+    uint64_t ticks_in_acquire_fail; //<                                  *failing* acquire calls()
+    uint64_t ticks_in_release;      //<                                  release() calls
+    uint64_t ticks_in_producer;     //< total number of ticks for producer to send max_count buffers
+    uint64_t ticks_in_consumer;     //<                       for consumer to recv max_count buffers
     uint64_t acq_okay_count;
     uint64_t acq_fail_count;
+    uint64_t rel_count;
 };
 
 struct mt_test_buffer_node {
@@ -252,6 +255,8 @@ struct mt_test_buffer_node {
 static void s_consumer_thread(void *args) {
     struct mt_test_data *test_data = args;
 
+    uint64_t consumer_ticks_before;
+    aws_sys_clock_get_ticks(&consumer_ticks_before);
     while (test_data->consumer_count < test_data->max_count) {
         aws_mutex_lock(&test_data->mutex);
 
@@ -304,7 +309,11 @@ static void s_consumer_thread(void *args) {
         aws_ring_buffer_release(&test_data->ring_buf, &buffer_node->buf);
         aws_sys_clock_get_ticks(&ticks_after);
         test_data->ticks_in_release += (ticks_after - ticks_before);
+        test_data->rel_count++;
     }
+    uint64_t consumer_ticks_after;
+    aws_sys_clock_get_ticks(&consumer_ticks_after);
+    test_data->ticks_in_consumer = consumer_ticks_after - consumer_ticks_before;
 
     aws_mutex_lock(&test_data->mutex);
     test_data->consumer_finished = true;
@@ -340,12 +349,15 @@ static int s_test_acquire_any_muti_threaded(
         .max_count = 1000000,
         .consumer_finished = false,
         .termination_signal = AWS_CONDITION_VARIABLE_INIT,
-        .ticks_in_release = 0,
         .ticks_in_acquire = 0,
         .ticks_in_acquire_okay = 0,
         .ticks_in_acquire_fail = 0,
+        .ticks_in_release = 0,
+        .ticks_in_producer = 0,
+        .ticks_in_consumer = 0,
         .acq_okay_count = 0,
         .acq_fail_count = 0,
+        .rel_count = 0,
     };
 
     static struct mt_test_buffer_node s_buffer_nodes[MT_BUFFER_COUNT];
@@ -361,6 +373,8 @@ static int s_test_acquire_any_muti_threaded(
 
     int counter = 0;
 
+    uint64_t producer_ticks_before;
+    aws_sys_clock_get_ticks(&producer_ticks_before);
     /* consumer_finished isn't protected and we don't need it to be immediately and it won't rip,
      * we just need it eventually if the consumer thread fails prematurely. */
     while (counter < test_data.max_count && !test_data.consumer_finished) {
@@ -404,6 +418,9 @@ static int s_test_acquire_any_muti_threaded(
             aws_mutex_unlock(&test_data.mutex);
         }
     }
+    uint64_t producer_ticks_after;
+    aws_sys_clock_get_ticks(&producer_ticks_after);
+    test_data.ticks_in_producer = producer_ticks_after - producer_ticks_before;
 
     aws_mutex_lock(&test_data.mutex);
     aws_condition_variable_wait_pred(
@@ -414,14 +431,18 @@ static int s_test_acquire_any_muti_threaded(
     aws_thread_clean_up(&consumer_thread);
 
     ASSERT_FALSE(test_data.match_failed);
-    fprintf(stdout, "ticks_in_release = %"PRIu64"\n", test_data.ticks_in_release);
-    fprintf(stdout, "ticks_in_acquire = %"PRIu64"\n", test_data.ticks_in_acquire);
-    fprintf(stdout, "ticks_in_acquire_okay = %"PRIu64"\n", test_data.ticks_in_acquire_okay);
-    fprintf(stdout, "ticks_in_acquire_fail = %"PRIu64"\n", test_data.ticks_in_acquire_fail);
-    fprintf(stdout, "acq_okay_count = %"PRIu64"\n", test_data.acq_okay_count);
-    fprintf(stdout, "acq_fail_count = %"PRIu64"\n", test_data.acq_fail_count);
-    fprintf(stdout, "Test finished!\n");
-
+    if (!test_data.match_failed) {
+        fprintf(stdout, "ticks_in_producer = %"PRIu64"\n", test_data.ticks_in_producer);
+        fprintf(stdout, "ticks_in_consumer = %"PRIu64"\n", test_data.ticks_in_consumer);
+        fprintf(stdout, "ticks_in_release = %"PRIu64"\n", test_data.ticks_in_release);
+        fprintf(stdout, "ticks_in_acquire = %"PRIu64"\n", test_data.ticks_in_acquire);
+        fprintf(stdout, "ticks_in_acquire_okay = %"PRIu64"\n", test_data.ticks_in_acquire_okay);
+        fprintf(stdout, "ticks_in_acquire_fail = %"PRIu64"\n", test_data.ticks_in_acquire_fail);
+        fprintf(stdout, "acq_okay_count = %"PRIu64"\n", test_data.acq_okay_count);
+        fprintf(stdout, "acq_fail_count = %"PRIu64"\n", test_data.acq_fail_count);
+        fprintf(stdout, "rel_count = %"PRIu64"\n", test_data.rel_count);
+        fprintf(stdout, "Test finished!\n");
+    }
     return AWS_OP_SUCCESS;
 }
 
