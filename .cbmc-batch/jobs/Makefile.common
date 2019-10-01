@@ -212,6 +212,9 @@ goto: $(ENTRY).goto
 cbmc.log: $(ENTRY).goto
 	cbmc $(CBMCFLAGS) --trace $< 2>&1 | tee $@
 
+sat.txt: $(ENTRY).goto
+	cbmc $(CBMCFLAGS) --dimacs --outfile $@ $<
+
 property.xml: $(ENTRY).goto
 	cbmc $(CBMCFLAGS) --show-properties --xml-ui $< 2>&1 > $@
 
