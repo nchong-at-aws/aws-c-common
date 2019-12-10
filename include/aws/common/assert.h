@@ -30,6 +30,8 @@ AWS_EXTERN_C_END
 
 #if defined(CBMC)
 #    define AWS_ASSUME(cond) __CPROVER_assume(cond)
+#elif defined(SMACK)
+#    define AWS_ASSUME(cond) assume(cond)
 #elif defined(_MSC_VER)
 #    define AWS_ASSUME(cond) __assume(cond)
 #    define AWS_UNREACHABLE() __assume(0)
@@ -51,13 +53,16 @@ AWS_EXTERN_C_END
 #if defined(CBMC)
 #    include <assert.h>
 #    define AWS_ASSERT(cond) assert(cond)
+#elif defined(SMACK)
+#    include "smack.h"
+#    define AWS_ASSERT(cond) assert(cond)
 #elif defined(DEBUG_BUILD) || __clang_analyzer__
 #    define AWS_ASSERT(cond) AWS_FATAL_ASSERT(cond)
 #else
 #    define AWS_ASSERT(cond)
 #endif /*  defined(CBMC) */
 
-#if defined(CBMC)
+#if defined(CBMC) || defined(SMACK)
 #    define AWS_FATAL_ASSERT(cond) AWS_ASSERT(cond)
 #elif __clang_analyzer__
 #    define AWS_FATAL_ASSERT(cond)                                                                                     \
